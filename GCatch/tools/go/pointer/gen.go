@@ -14,9 +14,14 @@ import (
 	"fmt"
 	"go/token"
 	"go/types"
+	"strconv"
+	"strings"
+	"unicode"
 
-	"github.com/system-pclub/GCatch/GCatch/tools/go/callgraph"
-	"github.com/system-pclub/GCatch/GCatch/tools/go/ssa"
+	"golang.org/x/tools/go/callgraph"
+	"golang.org/x/tools/go/ssa"
+	"golang.org/x/tools/go/ssa/ssautil"
+	"golang.org/x/tools/internal/typeparams"
 )
 
 var (
@@ -37,7 +42,6 @@ func (a *analysis) nextNode() nodeid {
 // analytically uninteresting.
 //
 // comment explains the origin of the nodes, as a debugging aid.
-//
 func (a *analysis) addNodes(typ types.Type, comment string) nodeid {
 	id := a.nextNode()
 	for _, fi := range a.flatten(typ) {
@@ -56,7 +60,6 @@ func (a *analysis) addNodes(typ types.Type, comment string) nodeid {
 //
 // comment explains the origin of the nodes, as a debugging aid.
 // subelement indicates the subelement, e.g. ".a.b[*].c".
-//
 func (a *analysis) addOneNode(typ types.Type, comment string, subelement *fieldInfo) nodeid {
 	id := a.nextNode()
 	a.nodes = append(a.nodes, &node{typ: typ, subelement: subelement, solve: new(solverState)})
@@ -69,7 +72,6 @@ func (a *analysis) addOneNode(typ types.Type, comment string, subelement *fieldI
 
 // setValueNode associates node id with the value v.
 // cgn identifies the context iff v is a local variable.
-//
 func (a *analysis) setValueNode(v ssa.Value, id nodeid, cgn *cgnode) {
 	if cgn != nil {
 		a.localval[v] = id
@@ -125,7 +127,6 @@ func (a *analysis) setValueNode(v ssa.Value, id nodeid, cgn *cgnode) {
 //
 // obj is the start node of the object, from a prior call to nextNode.
 // Its size, flags and optional data will be updated.
-//
 func (a *analysis) endObject(obj nodeid, cgn *cgnode, data interface{}) *object {
 	// Ensure object is non-empty by padding;
 	// the pad will be the object node.
@@ -150,7 +151,6 @@ func (a *analysis) endObject(obj nodeid, cgn *cgnode, data interface{}) *object 
 //
 // For a context-sensitive contour, callersite identifies the sole
 // callsite; for shared contours, caller is nil.
-//
 func (a *analysis) makeFunctionObject(fn *ssa.Function, callersite *callsite) nodeid {
 	if a.log != nil {
 		fmt.Fprintf(a.log, "\t---- makeFunctionObject %s\n", fn)
@@ -190,7 +190,6 @@ func (a *analysis) makeTagged(typ types.Type, cgn *cgnode, data interface{}) nod
 // payload points to the sole rtype object for T.
 //
 // TODO(adonovan): move to reflect.go; it's part of the solver really.
-//
 func (a *analysis) makeRtype(T types.Type) nodeid {
 	if v := a.rtypes.At(T); v != nil {
 		return v.(nodeid)
@@ -210,7 +209,7 @@ func (a *analysis) makeRtype(T types.Type) nodeid {
 	return id
 }
 
-// rtypeValue returns the type of the *reflect.rtype-tagged object obj.
+// rtypeTaggedValue returns the type of the *reflect.rtype-tagged object obj.
 func (a *analysis) rtypeTaggedValue(obj nodeid) types.Type {
 	tDyn, t, _ := a.taggedValue(obj)
 	if tDyn != a.reflectRtypePtr {
@@ -222,7 +221,6 @@ func (a *analysis) rtypeTaggedValue(obj nodeid) types.Type {
 // valueNode returns the id of the value node for v, creating it (and
 // the association) as needed.  It may return zero for uninteresting
 // values containing no pointers.
-//
 func (a *analysis) valueNode(v ssa.Value) nodeid {
 	// Value nodes for locals are created en masse by genFunc.
 	if id, ok := a.localval[v]; ok {
@@ -247,7 +245,6 @@ func (a *analysis) valueNode(v ssa.Value) nodeid {
 
 // valueOffsetNode ascertains the node for tuple/struct value v,
 // then returns the node for its subfield #index.
-//
 func (a *analysis) valueOffsetNode(v ssa.Value, index int) nodeid {
 	id := a.valueNode(v)
 	if id == 0 {
@@ -264,7 +261,6 @@ func (a *analysis) isTaggedObject(obj nodeid) bool {
 // taggedValue returns the dynamic type tag, the (first node of the)
 // payload, and the indirect flag of the tagged object starting at id.
 // Panic ensues if !isTaggedObject(id).
-//
 func (a *analysis) taggedValue(obj nodeid) (tDyn types.Type, v nodeid, indirect bool) {
 	n := a.nodes[obj]
 	flags := n.obj.flags
@@ -276,7 +272,6 @@ func (a *analysis) taggedValue(obj nodeid) (tDyn types.Type, v nodeid, indirect 
 
 // funcParams returns the first node of the params (P) block of the
 // function whose object node (obj.flags&otFunction) is id.
-//
 func (a *analysis) funcParams(id nodeid) nodeid {
 	n := a.nodes[id]
 	if n.obj == nil || n.obj.flags&otFunction == 0 {
@@ -287,7 +282,6 @@ func (a *analysis) funcParams(id nodeid) nodeid {
 
 // funcResults returns the first node of the results (R) block of the
 // function whose object node (obj.flags&otFunction) is id.
-//
 func (a *analysis) funcResults(id nodeid) nodeid {
 	n := a.nodes[id]
 	if n.obj == nil || n.obj.flags&otFunction == 0 {
@@ -305,7 +299,6 @@ func (a *analysis) funcResults(id nodeid) nodeid {
 
 // copy creates a constraint of the form dst = src.
 // sizeof is the width (in logical fields) of the copied type.
-//
 func (a *analysis) copy(dst, src nodeid, sizeof uint32) {
 	if src == dst || sizeof == 0 {
 		return // trivial
@@ -337,7 +330,6 @@ func (a *analysis) addressOf(T types.Type, id, obj nodeid) {
 // load creates a load constraint of the form dst = src[offset].
 // offset is the pointer offset in logical fields.
 // sizeof is the width (in logical fields) of the loaded type.
-//
 func (a *analysis) load(dst, src nodeid, offset, sizeof uint32) {
 	if dst == 0 {
 		return // load of non-pointerlike value
@@ -358,7 +350,6 @@ func (a *analysis) load(dst, src nodeid, offset, sizeof uint32) {
 // store creates a store constraint of the form dst[offset] = src.
 // offset is the pointer offset in logical fields.
 // sizeof is the width (in logical fields) of the stored type.
-//
 func (a *analysis) store(dst, src nodeid, offset uint32, sizeof uint32) {
 	if src == 0 {
 		return // store of non-pointerlike value
@@ -379,7 +370,6 @@ func (a *analysis) store(dst, src nodeid, offset uint32, sizeof uint32) {
 // offsetAddr creates an offsetAddr constraint of the form dst = &src.#offset.
 // offset is the field offset in logical fields.
 // T is the type of the address.
-//
 func (a *analysis) offsetAddr(T types.Type, dst, src nodeid, offset uint32) {
 	if !a.shouldTrack(T) {
 		return
@@ -398,7 +388,6 @@ func (a *analysis) offsetAddr(T types.Type, dst, src nodeid, offset uint32) {
 // typeAssert creates a typeFilter or untag constraint of the form dst = src.(T):
 // typeFilter for an interface, untag for a concrete type.
 // The exact flag is specified as for untagConstraint.
-//
 func (a *analysis) typeAssert(T types.Type, dst, src nodeid, exact bool) {
 	if isInterface(T) {
 		a.addConstraint(&typeFilterConstraint{T, dst, src})
@@ -417,7 +406,6 @@ func (a *analysis) addConstraint(c constraint) {
 
 // copyElems generates load/store constraints for *dst = *src,
 // where src and dst are slices or *arrays.
-//
 func (a *analysis) copyElems(cgn *cgnode, typ types.Type, dst, src ssa.Value) {
 	tmp := a.addNodes(typ, "copy")
 	sz := a.sizeof(typ)
@@ -553,10 +541,13 @@ func (a *analysis) genBuiltinCall(instr ssa.CallInstruction, cgn *cgnode) {
 // choose a policy.  The current policy, rather arbitrarily, is true
 // for intrinsics and accessor methods (actually: short, single-block,
 // call-free functions).  This is just a starting point.
-//
 func (a *analysis) shouldUseContext(fn *ssa.Function) bool {
 	if a.findIntrinsic(fn) != nil {
 		return true // treat intrinsics context-sensitively
+	}
+	// MYCODE(boqin): TODO
+	if is_in_sensitive_list(fn) {
+		return true
 	}
 	if len(fn.Blocks) != 1 {
 		return false // too expensive
@@ -705,11 +696,13 @@ func (a *analysis) genInvoke(caller *cgnode, site *callsite, call *ssa.CallCommo
 // practice it occurs rarely, so we special case for reflect.Type.)
 //
 // In effect we treat this:
-//    var rt reflect.Type = ...
-//    rt.F()
-// as this:
-//    rt.(*reflect.rtype).F()
 //
+//	var rt reflect.Type = ...
+//	rt.F()
+//
+// as this:
+//
+//	rt.(*reflect.rtype).F()
 func (a *analysis) genInvokeReflectType(caller *cgnode, site *callsite, call *ssa.CallCommon, result nodeid) {
 	// Unpack receiver into rtype
 	rtype := a.addOneNode(a.reflectRtypePtr, "rtype.recv", nil)
@@ -789,13 +782,15 @@ func (a *analysis) genCall(caller *cgnode, instr ssa.CallInstruction) {
 // a simple copy constraint when the sole destination is known a priori.
 //
 // Some SSA instructions always have singletons points-to sets:
-// 	Alloc, Function, Global, MakeChan, MakeClosure,  MakeInterface,  MakeMap,  MakeSlice.
+//
+//	Alloc, Function, Global, MakeChan, MakeClosure,  MakeInterface,  MakeMap,  MakeSlice.
+//
 // Others may be singletons depending on their operands:
-// 	FreeVar, Const, Convert, FieldAddr, IndexAddr, Slice, SliceToArrayPointer.
+//
+//	FreeVar, Const, Convert, FieldAddr, IndexAddr, Slice, SliceToArrayPointer.
 //
 // Idempotent.  Objects are created as needed, possibly via recursion
 // down the SSA value graph, e.g IndexAddr(FieldAddr(Alloc))).
-//
 func (a *analysis) objectNode(cgn *cgnode, v ssa.Value) nodeid {
 	switch v.(type) {
 	case *ssa.Global, *ssa.Function, *ssa.Const, *ssa.FreeVar:
@@ -833,6 +828,12 @@ func (a *analysis) objectNode(cgn *cgnode, v ssa.Value) nodeid {
 		case *ssa.Alloc:
 			obj = a.nextNode()
 			a.addNodes(mustDeref(v.Type()), "alloc")
+			a.endObject(obj, cgn, v)
+
+		// MYCODE(boqin): case *ssa.Extract is borrowed from mypointer
+		case *ssa.Extract:
+			obj = a.nextNode()
+			a.addNodes(v.Type(), "Extract")
 			a.endObject(obj, cgn, v)
 
 		case *ssa.MakeSlice:
@@ -882,6 +883,7 @@ func (a *analysis) objectNode(cgn *cgnode, v ssa.Value) nodeid {
 		case *ssa.Slice:
 			obj = a.objectNode(cgn, v.X)
 
+		// MYCODE(boqin): case *ssa.SliceToArrayPointer is NOT in mypointer
 		case *ssa.SliceToArrayPointer:
 			// Going from a []T to a *[k]T for some k.
 			// A slice []T is treated as if it were a *T pointer.
@@ -992,7 +994,11 @@ func (a *analysis) genInstr(cgn *cgnode, instr ssa.Instruction) {
 			a.sizeof(instr.Type()))
 
 	case *ssa.Index:
-		a.copy(a.valueNode(instr), 1+a.valueNode(instr.X), a.sizeof(instr.Type()))
+		// MYCODE(boqin): this is NOT in mypointer. Is the isstring check necessary here?
+		_, isstring := typeparams.CoreType(instr.X.Type()).(*types.Basic)
+		if !isstring {
+			a.copy(a.valueNode(instr), 1+a.valueNode(instr.X), a.sizeof(instr.Type()))
+		}
 
 	case *ssa.Select:
 		recv := a.valueOffsetNode(instr, 2) // instr : (index, recvOk, recv0, ... recv_n-1)
@@ -1035,6 +1041,7 @@ func (a *analysis) genInstr(cgn *cgnode, instr ssa.Instruction) {
 	case *ssa.Slice:
 		a.copy(a.valueNode(instr), a.valueNode(instr.X), 1)
 
+	// MYCODE(boqin): this is NOT in mypointer.
 	case *ssa.SliceToArrayPointer:
 		// Going from a []T to a *[k]T (for some k) is a single `dst = src` constraint.
 		// Both []T and *[k]T are modelled as an *IdArrayT where IdArrayT is the identity
@@ -1065,6 +1072,7 @@ func (a *analysis) genInstr(cgn *cgnode, instr ssa.Instruction) {
 	case *ssa.Range:
 		// Do nothing.  Next{Iter: *ssa.Range} handles this case.
 
+	// MYCODE(boqin): different from mypointer
 	case *ssa.Next:
 		if !instr.IsString {
 			// Assumes that Next is always directly applied to a Range result
@@ -1156,7 +1164,6 @@ func (a *analysis) makeCGNode(fn *ssa.Function, obj nodeid, callersite *callsite
 // genRootCalls generates the synthetic root of the callgraph and the
 // initial calls from it to the analysis scope, such as main, a test
 // or a library.
-//
 func (a *analysis) genRootCalls() *cgnode {
 	r := a.prog.NewFunction("<root>", new(types.Signature), "root of callgraph")
 	root := a.makeCGNode(r, 0, nil)
@@ -1165,22 +1172,56 @@ func (a *analysis) genRootCalls() *cgnode {
 	// root function so we don't need to special-case site-less
 	// call edges.
 
-	// For each main package, call main.init(), main.main().
-	for _, mainPkg := range a.config.Mains {
-		main := mainPkg.Func("main")
-		if main == nil {
-			panic(fmt.Sprintf("%s has no main function", mainPkg))
+	//MYCODE
+	// The following anotated code need an entry point. However, we can just scan all functions that have no caller
+	// // For each main package, call main.init(), main.main().
+	// for _, mainPkg := range a.config.OLDMains {
+	// 	main := mainPkg.Func("main")
+	// 	if main == nil {
+	// 		panic(fmt.Sprintf("%s has no main function", mainPkg))
+	// 	}
+
+	// 	targets := a.addOneNode(main.Signature, "root.targets", nil)
+	// 	site := &callsite{targets: targets}
+	// 	root.sites = append(root.sites, site)
+	// 	for _, fn := range [2]*ssa.Function{mainPkg.Func("init"), main} {
+	// 		if a.log != nil {
+	// 			fmt.Fprintf(a.log, "\troot call to %s:\n", fn)
+	// 		}
+	// 		a.copy(targets, a.valueNode(fn), 1)
+	// 	}
+	// }
+
+	// Start with all functions that don't have caller
+	for fn, _ := range ssautil.AllFunctions(a.prog) {
+		if fn == nil {
+			continue
 		}
 
-		targets := a.addOneNode(main.Signature, "root.targets", nil)
+		if index := strings.Index(fn.Name(), "init#"); index > -1 {
+			name_after := fn.Name()[index+5:]
+			_, err := strconv.Atoi(name_after)
+			if err == nil { // successfully converted, meaning the function name is like init#123
+				continue
+			}
+		}
+
+		if Known_callgraph != nil { // This is the second time to run pointer analysis
+			node := Known_callgraph.Nodes[fn]
+			if len(node.In) != 0 {
+				continue
+			}
+		}
+
+		targets := a.addOneNode(fn.Signature, "root.targets", nil)
 		site := &callsite{targets: targets}
 		root.sites = append(root.sites, site)
-		for _, fn := range [2]*ssa.Function{mainPkg.Func("init"), main} {
-			if a.log != nil {
-				fmt.Fprintf(a.log, "\troot call to %s:\n", fn)
-			}
-			a.copy(targets, a.valueNode(fn), 1)
+
+		if a.log != nil {
+			fmt.Fprintf(a.log, "\troot call to %s:\n", fn)
 		}
+		a.copy(targets, a.valueNode(fn), 1)
+
 	}
 
 	return root
@@ -1213,6 +1254,21 @@ func (a *analysis) genFunc(cgn *cgnode) {
 
 	if fn.Blocks == nil {
 		// External function with no intrinsic treatment.
+		// We'll warn about calls to such functions at the end.
+		return
+	}
+
+	// MYCODE(boqin): This is NOT in mypointer
+	if fn.TypeParams().Len() > 0 && len(fn.TypeArgs()) == 0 {
+		// Body of generic function.
+		// We'll warn about calls to such functions at the end.
+		return
+	}
+
+	// MYCODE(boqin): This is NOT in mypointer
+	if strings.HasPrefix(fn.Synthetic, "instantiation wrapper ") {
+		// instantiation wrapper of a generic function.
+		// These may contain type coercions which are not currently supported.
 		// We'll warn about calls to such functions at the end.
 		return
 	}
@@ -1277,9 +1333,99 @@ func (a *analysis) genFunc(cgn *cgnode) {
 			a.genInstr(cgn, instr)
 		}
 	}
+	///MYCODE
+	// If we have the Known_callgraph and Recv_to_methods_map
+	// If this function is a non-synthetic non-anonymous exported (starting with an Uppercase letter) method
+	if Known_callgraph != nil && Recv_to_methods_map != nil {
+		if fn.Signature.Recv() == nil || fn.Synthetic != "" || strings.Contains(fn.String(), "$") {
+			goto Normal
+		}
+		is_exported := false // In Go, a function whose name starts with an Uppercase is exported
+		for _, r := range fn.Name() {
+			if unicode.IsUpper(r) {
+				is_exported = true
+			} else {
+				is_exported = false
+			}
+			break
+		}
+		if is_exported == false {
+			goto Normal
+		}
+		method := Known_callgraph.Nodes[fn]
+		if method == nil {
+			goto Normal
+		}
+
+		// Now record all other non-synthetic methods non-anonymous methods that have no caller
+		no_caller_methods := []*callgraph.Node{}
+		recv := fn.Params[0]
+		all_methods := Recv_to_methods_map[recv.Type().String()]
+		for _, other_method := range all_methods {
+			if other_method == method || other_method.Func.Synthetic != "" || strings.Contains(other_method.Func.String(), "$") {
+				continue
+			}
+			if len(other_method.In) > 0 {
+				continue
+			}
+
+			no_caller_methods = append(no_caller_methods, other_method)
+		}
+		// As if fn will call all functions in no_caller_methods
+		for _, other_method := range no_caller_methods {
+			a.genFakeCall(fn, other_method.Func)
+		}
+
+	}
+
+Normal:
 
 	a.localval = nil
 	a.localobj = nil
+}
+
+// MYCODE
+// genFakeCall generates constraints for a fake call between caller and callee.
+func (a *analysis) genFakeCall(caller, callee *ssa.Function) {
+
+	// Ascertain the context (contour/cgnode) for a particular call.
+	var obj nodeid
+	obj = a.objectNode(nil, callee) // shared contour
+
+	// Copy receiver
+	params := a.funcParams(obj)
+	caller_param0 := caller.Params[0]
+	var param0_arg ssa.Value
+outer:
+	for _, bb := range caller.Blocks {
+		for _, inst := range bb.Instrs {
+			if v, ok := inst.(ssa.Value); ok {
+				if v.Type().String() == caller_param0.Type().String() && v != caller_param0 {
+					param0_arg = v
+					break outer
+				}
+			}
+			operands := inst.Operands([]*ssa.Value{})
+			for _, operand := range operands {
+				if operand == nil {
+					continue
+				}
+				v := *operand
+				if v == nil {
+					continue
+				}
+				if v.Type().String() == caller_param0.Type().String() && v != caller_param0 {
+					param0_arg = v
+					break outer
+				}
+			}
+		}
+	}
+	if param0_arg == nil {
+		return
+	}
+	sz := a.sizeof(param0_arg.Type())
+	a.copy(params, a.valueNode(param0_arg), sz)
 }
 
 // genMethodsOf generates nodes and constraints for all methods of type T.
@@ -1336,6 +1482,11 @@ func (a *analysis) generate() {
 	// Generate constraints for functions as they become reachable
 	// from the roots.  (No constraints are generated for functions
 	// that are dead in this analysis scope.)
+
+	// MYCODE(boqin): Why this redundant code is in mypointer?
+	list := a.genq
+	_ = list
+
 	for len(a.genq) > 0 {
 		cgn := a.genq[0]
 		a.genq = a.genq[1:]

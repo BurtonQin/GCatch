@@ -47,13 +47,11 @@ func Visit(pkgs []*Package, pre func(*Package) bool, post func(*Package)) {
 // PrintErrors prints to os.Stderr the accumulated errors of all
 // packages in the import graph rooted at pkgs, dependencies first.
 // PrintErrors returns the number of errors printed.
-func PrintErrors(pkgs []*Package,show_compile_error bool) int {
+func PrintErrors(pkgs []*Package) int {
 	var n int
 	Visit(pkgs, nil, func(pkg *Package) {
 		for _, err := range pkg.Errors {
-			if show_compile_error == true {//MYCODE: This is modified by me
-				fmt.Fprintln(os.Stderr, err)
-			}
+			fmt.Fprintln(os.Stderr, err)
 			n++
 		}
 	})

@@ -2,9 +2,10 @@ package syncgraph
 
 import (
 	"fmt"
+
 	"github.com/system-pclub/GCatch/GCatch/config"
 	"github.com/system-pclub/GCatch/GCatch/instinfo"
-	"github.com/system-pclub/GCatch/GCatch/tools/github.com/aclements/go-z3/z3"
+	"github.com/aclements/go-z3/z3"
 )
 
 type ZGoroutine struct {
@@ -66,7 +67,7 @@ func (b *ZNodeBasic) UpdateOrder(i z3.Int) {
 type ZNodeNbSend struct {
 	ZNodeBasic
 	Closes []*ZNodeClose
-	Pairs []*ZSendRecvPair
+	Pairs  []*ZSendRecvPair
 }
 
 type ZNodeNbRecv struct {
@@ -296,7 +297,7 @@ func (z *Z3System) Prepare(vecPPath []*PPath, vecBlockPos []blockingPos) error {
 							newZnode = &ZNodeBSend{
 								Buffer:     buffer,
 								ZNodeBasic: newBasic,
-								IsLock: false,
+								IsLock:     false,
 							}
 						case *instinfo.ChRecv:
 							newZnode = &ZNodeBRecv{

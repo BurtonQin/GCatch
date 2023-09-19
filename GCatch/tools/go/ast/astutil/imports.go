@@ -3,7 +3,7 @@
 // license that can be found in the LICENSE file.
 
 // Package astutil contains common utilities for working with the Go AST.
-package astutil // import "github.com/system-pclub/GCatch/GCatch/tools/go/ast/astutil"
+package astutil // import "golang.org/x/tools/go/ast/astutil"
 
 import (
 	"fmt"
@@ -22,8 +22,11 @@ func AddImport(fset *token.FileSet, f *ast.File, path string) (added bool) {
 // If name is not empty, it is used to rename the import.
 //
 // For example, calling
+//
 //	AddNamedImport(fset, f, "pathpkg", "path")
+//
 // adds
+//
 //	import pathpkg "path"
 func AddNamedImport(fset *token.FileSet, f *ast.File, name, path string) (added bool) {
 	if imports(f, name, path) {
@@ -192,7 +195,7 @@ func AddNamedImport(fset *token.FileSet, f *ast.File, name, path string) (added 
 
 func isThirdParty(importPath string) bool {
 	// Third party package import path usually contains "." (".com", ".org", ...)
-	// This logic is taken from github.com/system-pclub/GCatch/GCatch/tools/imports package.
+	// This logic is taken from golang.org/x/tools/imports package.
 	return strings.Contains(importPath, ".")
 }
 
@@ -270,8 +273,8 @@ func DeleteNamedImport(fset *token.FileSet, f *ast.File, name, path string) (del
 			}
 			if j > 0 {
 				lastImpspec := gen.Specs[j-1].(*ast.ImportSpec)
-				lastLine := fset.Position(lastImpspec.Path.ValuePos).Line
-				line := fset.Position(impspec.Path.ValuePos).Line
+				lastLine := fset.PositionFor(lastImpspec.Path.ValuePos, false).Line
+				line := fset.PositionFor(impspec.Path.ValuePos, false).Line
 
 				// We deleted an entry but now there may be
 				// a blank line-sized hole where the import was.

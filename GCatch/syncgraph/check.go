@@ -2,6 +2,7 @@ package syncgraph
 
 import (
 	"fmt"
+
 	"github.com/system-pclub/GCatch/GCatch/config"
 	"github.com/system-pclub/GCatch/GCatch/instinfo"
 	"github.com/system-pclub/GCatch/GCatch/output"
@@ -54,7 +55,7 @@ func (g SyncGraph) CheckWithZ3() bool {
 						continue
 					}
 					if g.Task.IsPrimATarget(syncNode.Primitive()) {
-						if op, ok := syncNode.(*ChanOp);ok {
+						if op, ok := syncNode.(*ChanOp); ok {
 							if chClose, ok := op.Op.(*instinfo.ChClose); ok {
 								vecClose = append(vecClose, chClose)
 							}
@@ -81,7 +82,6 @@ func (g SyncGraph) CheckWithZ3() bool {
 				}
 			}
 		}
-
 
 		// List all blocking op of target channel on any path
 		pathId2AllBlockPos := make(map[int][]blockingPos)

@@ -10,10 +10,10 @@ import (
 	"go/token"
 	"io"
 
-	"github.com/system-pclub/GCatch/GCatch/tools/container/intsets"
-	"github.com/system-pclub/GCatch/GCatch/tools/go/callgraph"
-	"github.com/system-pclub/GCatch/GCatch/tools/go/ssa"
-	"github.com/system-pclub/GCatch/GCatch/tools/go/types/typeutil"
+	"golang.org/x/tools/container/intsets"
+	"golang.org/x/tools/go/callgraph"
+	"golang.org/x/tools/go/ssa"
+	"golang.org/x/tools/go/types/typeutil"
 )
 
 // A Config formulates a pointer analysis problem for Analyze. It is
@@ -28,8 +28,19 @@ type Config struct {
 	// dependencies of any main package may still affect the
 	// analysis result, because they contribute runtime types and
 	// thus methods.
+	//
 	// TODO(adonovan): investigate whether this is desirable.
-	Mains []*ssa.Package
+	//
+	// Calls to generic functions will be unsound unless packages
+	// are built using the ssa.InstantiateGenerics builder mode.
+
+	// MYCODE
+	// Rename Mains to OLDMains
+	OLDMains []*ssa.Package
+
+	// MYCODE
+	// Add Program
+	Prog *ssa.Program
 
 	// Reflection determines whether to handle reflection
 	// operators soundly, which is currently rather slow since it
@@ -93,7 +104,7 @@ func (c *Config) AddQuery(v ssa.Value) {
 	c.Queries[v] = struct{}{}
 }
 
-// AddQuery adds v to Config.IndirectQueries.
+// AddIndirectQuery adds v to Config.IndirectQueries.
 // Precondition: CanPoint(v.Type().Underlying().(*types.Pointer).Elem()).
 func (c *Config) AddIndirectQuery(v ssa.Value) {
 	if c.IndirectQueries == nil {
@@ -128,9 +139,10 @@ func (c *Config) AddIndirectQuery(v ssa.Value) {
 // before analysis has finished has undefined behavior.
 //
 // Example:
-// 	// given v, which represents a function call to 'fn() (int, []*T)', and
-// 	// 'type T struct { F *int }', the following query will access the field F.
-// 	c.AddExtendedQuery(v, "x[1][0].F")
+//
+//	// given v, which represents a function call to 'fn() (int, []*T)', and
+//	// 'type T struct { F *int }', the following query will access the field F.
+//	c.AddExtendedQuery(v, "x[1][0].F")
 func (c *Config) AddExtendedQuery(v ssa.Value, query string) (*Pointer, error) {
 	ops, _, err := parseExtendedQuery(v.Type(), query)
 	if err != nil {
@@ -146,8 +158,13 @@ func (c *Config) AddExtendedQuery(v ssa.Value, query string) (*Pointer, error) {
 }
 
 func (c *Config) prog() *ssa.Program {
-	for _, main := range c.Mains {
-		return main.Prog
+	// MYCODE
+	// Replace Mains with Prog
+	// for _, main := range c.Mains {
+	// 	return main.Prog
+	// }
+	if c.Prog != nil {
+		return c.Prog
 	}
 	panic("empty scope")
 }
@@ -160,7 +177,6 @@ type Warning struct {
 // A Result contains the results of a pointer analysis.
 //
 // See Config for how to request the various Result components.
-//
 type Result struct {
 	CallGraph       *callgraph.Graph      // discovered call graph
 	Queries         map[ssa.Value]Pointer // pts(v) for each v in Config.Queries.
@@ -172,7 +188,6 @@ type Result struct {
 //
 // A Pointer doesn't have a unique type because pointers of distinct
 // types may alias the same object.
-//
 type Pointer struct {
 	a *analysis
 	n nodeid
@@ -223,7 +238,6 @@ func (s PointsToSet) Labels() []*Label {
 // map value is the PointsToSet for pointers of that type.
 //
 // The result is empty unless CanHaveDynamicTypes(T).
-//
 func (s PointsToSet) DynamicTypes() *typeutil.Map {
 	var tmap typeutil.Map
 	tmap.SetHasher(s.a.hasher)
@@ -261,6 +275,14 @@ func (s PointsToSet) Intersects(y PointsToSet) bool {
 	return !z.IsEmpty()
 }
 
+// MYCODE
+func (x PointsToSet) Equals(y PointsToSet) bool {
+	if x.pts == nil || y.pts == nil {
+		return false
+	}
+	return x.pts.Sparse.Equals(&y.pts.Sparse)
+}
+
 func (p Pointer) String() string {
 	return fmt.Sprintf("n%d", p.n)
 }
@@ -277,6 +299,13 @@ func (p Pointer) PointsTo() PointsToSet {
 // the argument pointer.
 func (p Pointer) MayAlias(q Pointer) bool {
 	return p.PointsTo().Intersects(q.PointsTo())
+}
+
+// MYCODE
+// Equals reports whether the receiver pointer has equal points-to set of
+// the argument pointer.
+func (p Pointer) Equals(q Pointer) bool {
+	return p.PointsTo().Equals(q.PointsTo())
 }
 
 // DynamicTypes returns p.PointsTo().DynamicTypes().

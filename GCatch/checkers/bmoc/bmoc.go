@@ -2,11 +2,12 @@ package bmoc
 
 import (
 	"fmt"
+	"strconv"
+
 	"github.com/system-pclub/GCatch/GCatch/analysis/pointer"
 	"github.com/system-pclub/GCatch/GCatch/config"
 	"github.com/system-pclub/GCatch/GCatch/instinfo"
 	"github.com/system-pclub/GCatch/GCatch/syncgraph"
-	"strconv"
 )
 
 func Detect() {
@@ -97,7 +98,7 @@ func CheckCh(ch *instinfo.Channel, vecChannel []*instinfo.Channel, vecLocker []*
 			}
 		}
 		if config.Print_Debug_Info {
-			fmt.Println("-----count_unbuffer_bug:", countUnbufferBug,"---buffer_bug:", countBufferBug)
+			fmt.Println("-----count_unbuffer_bug:", countUnbufferBug, "---buffer_bug:", countBufferBug)
 		}
 	}
 	if config.Print_Debug_Info {

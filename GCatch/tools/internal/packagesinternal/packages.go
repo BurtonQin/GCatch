@@ -6,7 +6,7 @@
 package packagesinternal
 
 import (
-	"github.com/system-pclub/GCatch/GCatch/tools/internal/gocommand"
+	"golang.org/x/tools/internal/gocommand"
 )
 
 var GetForTest = func(p interface{}) string { return "" }
@@ -23,6 +23,8 @@ var GetGoCmdRunner = func(config interface{}) *gocommand.Runner { return nil }
 var SetGoCmdRunner = func(config interface{}, runner *gocommand.Runner) {}
 
 var TypecheckCgo int
+var DepsErrors int // must be set as a LoadMode to call GetDepsErrors
+var ForTest int    // must be set as a LoadMode to call GetForTest
 
 var SetModFlag = func(config interface{}, value string) {}
 var SetModFile = func(config interface{}, value string) {}

@@ -2,12 +2,13 @@ package doublelock
 
 import (
 	"fmt"
+
 	"github.com/system-pclub/GCatch/GCatch/config"
 	"github.com/system-pclub/GCatch/GCatch/output"
-	"github.com/system-pclub/GCatch/GCatch/tools/go/callgraph"
-	"github.com/system-pclub/GCatch/GCatch/tools/go/ssa"
-	"github.com/system-pclub/GCatch/GCatch/tools/go/ssa/ssautil"
 	"github.com/system-pclub/GCatch/GCatch/util"
+	"golang.org/x/tools/go/callgraph"
+	"golang.org/x/tools/go/ssa"
+	"golang.org/x/tools/go/ssa/ssautil"
 )
 
 var AnalyzedFNs map[string]bool
@@ -28,7 +29,7 @@ var numInspectedFn int
 
 func isReported(bug *StDoubleLock) bool {
 	for _, b := range vecReportedBugs {
-		if b.PLock1 == bug.PLock1 && b.PLock2 == b.PLock2 {
+		if b.PLock1 == bug.PLock1 && b.PLock2 == bug.PLock2 {
 			return true
 		}
 

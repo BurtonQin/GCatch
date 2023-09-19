@@ -2,9 +2,9 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-package ssautil // import "github.com/system-pclub/GCatch/GCatch/tools/go/ssa/ssautil"
+package ssautil // import "golang.org/x/tools/go/ssa/ssautil"
 
-import "github.com/system-pclub/GCatch/GCatch/tools/go/ssa"
+import "golang.org/x/tools/go/ssa"
 
 // This file defines utilities for visiting the SSA representation of
 // a Program.
@@ -18,7 +18,6 @@ import "github.com/system-pclub/GCatch/GCatch/tools/go/ssa"
 // synthetic wrappers.
 //
 // Precondition: all packages are built.
-//
 func AllFunctions(prog *ssa.Program) map[*ssa.Function]bool {
 	visit := visitor{
 		prog: prog,

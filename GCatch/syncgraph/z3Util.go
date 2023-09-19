@@ -2,8 +2,9 @@ package syncgraph
 
 import (
 	"fmt"
-	"github.com/system-pclub/GCatch/GCatch/tools/github.com/aclements/go-z3/z3"
 	"strconv"
+
+	"github.com/aclements/go-z3/z3"
 )
 
 // given a slice of *z3.Bool, onlyOneTrue returns a z3.Bool that is equal to "one and only one of the slice is true"

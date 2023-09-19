@@ -7,9 +7,9 @@ package event
 import (
 	"context"
 
-	"github.com/system-pclub/GCatch/GCatch/tools/internal/event/core"
-	"github.com/system-pclub/GCatch/GCatch/tools/internal/event/keys"
-	"github.com/system-pclub/GCatch/GCatch/tools/internal/event/label"
+	"golang.org/x/tools/internal/event/core"
+	"golang.org/x/tools/internal/event/keys"
+	"golang.org/x/tools/internal/event/label"
 )
 
 // Exporter is a function that handles events.

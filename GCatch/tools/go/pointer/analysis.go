@@ -14,12 +14,12 @@ import (
 	"os"
 	"reflect"
 	"runtime"
-	"runtime/debug"
 	"sort"
+	"strings"
 
-	"github.com/system-pclub/GCatch/GCatch/tools/go/callgraph"
-	"github.com/system-pclub/GCatch/GCatch/tools/go/ssa"
-	"github.com/system-pclub/GCatch/GCatch/tools/go/types/typeutil"
+	"golang.org/x/tools/go/callgraph"
+	"golang.org/x/tools/go/ssa"
+	"golang.org/x/tools/go/types/typeutil"
 )
 
 const (
@@ -46,7 +46,6 @@ const (
 //
 // (Note: most variables called 'obj' are not *objects but nodeids
 // such that a.nodes[obj].obj != nil.)
-//
 type object struct {
 	// flags is a bitset of the node type (ot*) flags defined above.
 	flags uint32
@@ -59,8 +58,8 @@ type object struct {
 	//
 	// ssa.Value	for an object allocated by an SSA operation.
 	// types.Type	for an rtype instance object or *rtype-tagged object.
-	// string	for an instrinsic object, e.g. the array behind os.Args.
-	// nil		for an object allocated by an instrinsic.
+	// string	for an intrinsic object, e.g. the array behind os.Args.
+	// nil		for an object allocated by an intrinsic.
 	//		(cgn provides the identity of the intrinsic.)
 	data interface{}
 
@@ -82,7 +81,6 @@ type nodeid uint32
 //
 // Nodes that are pointed-to locations ("labels") have an enclosing
 // object (see analysis.enclosingObject).
-//
 type node struct {
 	// If non-nil, this node is the start of an object
 	// (addressable memory location).
@@ -210,21 +208,47 @@ func (a *analysis) computeTrackBits() {
 	}
 }
 
+// /MYCODE
+var Known_callgraph *callgraph.Graph
+var Recv_to_methods_map map[string][]*callgraph.Node
+
 // Analyze runs the pointer analysis with the scope and options
 // specified by config, and returns the (synthetic) root of the callgraph.
 //
 // Pointer analysis of a transitively closed well-typed program should
 // always succeed.  An error can occur only due to an internal bug.
-//
-func Analyze(config *Config) (result *Result, err error) {
-	if config.Mains == nil {
+func Analyze(config *Config, known_callgraph *callgraph.Graph) (result *Result, err error) {
+	///MYCODE
+	// Do some preparation
+	Known_callgraph = known_callgraph
+	if Known_callgraph != nil { // This is the second run of pointer analysis. We know the callgraph
+		Recv_to_methods_map = make(map[string][]*callgraph.Node)
+		for _, node := range Known_callgraph.Nodes {
+			if node.Func == nil {
+				continue
+			}
+			recv := node.Func.Signature.Recv()
+			if recv == nil {
+				continue
+			}
+			recv_type := recv.Type().String()
+			methods := Recv_to_methods_map[recv_type]
+			_ = methods
+			Recv_to_methods_map[recv_type] = append(Recv_to_methods_map[recv_type], node)
+		}
+	}
+
+	// MYCODE
+	// Replace Mains with Prog
+	if config.Prog == nil {
 		return nil, fmt.Errorf("no main/test packages to analyze (check $GOROOT/$GOPATH)")
 	}
 	defer func() {
 		if p := recover(); p != nil {
 			err = fmt.Errorf("internal error in pointer analysis: %v (please report this bug)", p)
-			fmt.Fprintln(os.Stderr, "Internal panic in pointer analysis:")
-			debug.PrintStack()
+			// MYCODE
+			// fmt.Fprintln(os.Stderr, "Internal panic in pointer analysis:")
+			// debug.PrintStack()
 		}
 	}()
 
@@ -356,16 +380,28 @@ func Analyze(config *Config) (result *Result, err error) {
 		}
 	}
 
+	///MYCODE
+	// Delete my synthesized <root> function, which calls all the functions
+	if a.config.BuildCallGraph {
+		for _, node := range a.result.CallGraph.Nodes {
+			if node.Func.Name() == "<root>" {
+				a.result.CallGraph.DeleteNode(node)
+				break
+			}
+		}
+	}
+
 	return a.result, nil
 }
 
 // callEdge is called for each edge in the callgraph.
 // calleeid is the callee's object node (has otFunction flag).
-//
 func (a *analysis) callEdge(caller *cgnode, site *callsite, calleeid nodeid) {
 	obj := a.nodes[calleeid].obj
 	if obj.flags&otFunction == 0 {
-		panic(fmt.Sprintf("callEdge %s -> n%d: not a function object", site, calleeid))
+		///MYCODE
+		return
+		// panic(fmt.Sprintf("callEdge %s -> n%d: not a function object", site, calleeid))
 	}
 	callee := obj.cgn
 
@@ -381,10 +417,25 @@ func (a *analysis) callEdge(caller *cgnode, site *callsite, calleeid nodeid) {
 		fmt.Fprintf(a.log, "\tcall edge %s -> %s\n", site, callee)
 	}
 
-	// Warn about calls to non-intrinsic external functions.
+	// Warn about calls to functions that are handled unsoundly.
 	// TODO(adonovan): de-dup these messages.
-	if fn := callee.fn; fn.Blocks == nil && a.findIntrinsic(fn) == nil {
+	fn := callee.fn
+
+	// Warn about calls to non-intrinsic external functions.
+	if fn.Blocks == nil && a.findIntrinsic(fn) == nil {
 		a.warnf(site.pos(), "unsound call to unknown intrinsic: %s", fn)
+		a.warnf(fn.Pos(), " (declared here)")
+	}
+
+	// Warn about calls to generic function bodies.
+	if fn.TypeParams().Len() > 0 && len(fn.TypeArgs()) == 0 {
+		a.warnf(site.pos(), "unsound call to generic function body: %s (build with ssa.InstantiateGenerics)", fn)
+		a.warnf(fn.Pos(), " (declared here)")
+	}
+
+	// Warn about calls to instantiation wrappers of generics functions.
+	if fn.Origin() != nil && strings.HasPrefix(fn.Synthetic, "instantiation wrapper ") {
+		a.warnf(site.pos(), "unsound call to instantiation wrapper of generic: %s (build with ssa.InstantiateGenerics)", fn)
 		a.warnf(fn.Pos(), " (declared here)")
 	}
 }
@@ -394,7 +445,6 @@ func (a *analysis) callEdge(caller *cgnode, site *callsite, calleeid nodeid) {
 // It only dumps the nodes that existed before solving.  The order in
 // which solver-created nodes are created depends on pre-solver
 // optimization, so we can't include them in the cross-check.
-//
 func (a *analysis) dumpSolution(filename string, N int) {
 	f, err := os.Create(filename)
 	if err != nil {
@@ -422,7 +472,6 @@ func (a *analysis) dumpSolution(filename string, N int) {
 // showCounts logs the size of the constraint system.  A typical
 // optimized distribution is 65% copy, 13% load, 11% addr, 5%
 // offsetAddr, 4% store, 2% others.
-//
 func (a *analysis) showCounts() {
 	if a.log != nil {
 		counts := make(map[reflect.Type]int)

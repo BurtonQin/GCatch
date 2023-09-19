@@ -10,7 +10,7 @@ import (
 	"math"
 	"strconv"
 
-	"github.com/system-pclub/GCatch/GCatch/tools/internal/event/label"
+	"golang.org/x/tools/internal/event/label"
 )
 
 // Value represents a key for untyped values.
